@@ -3,7 +3,7 @@ import { agentRequestSchema } from "@/lib/schemas";
 import { runAgent } from "@/lib/agent/runAgent";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /** POST /api/agent  body: { messages: [{ role: "user" | "model", text: string }] } */
 export async function POST(request: Request) {

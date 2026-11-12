@@ -38,8 +38,13 @@ export default function AgentChat({ onDataChanged }: { onDataChanged?: () => voi
         // Only the last 20 messages are sent, to keep requests small.
         body: JSON.stringify({ messages: next.slice(-20).map(({ role, text }) => ({ role, text })) }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Request failed");
+      if (!res.ok) throw new Error("The agent took too long or failed. Please try again.");
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error("The agent took too long or failed. Please try again.");
+      }
       const result = data as AgentResult;
       setMessages([...next, { role: "model", text: result.reply, steps: result.steps }]);
       if (result.steps.some((s) => s.writes && s.ok)) onDataChanged?.();

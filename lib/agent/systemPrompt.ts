@@ -13,6 +13,7 @@ Today is ${weekdayInIndia()}, ${todayInIndia()} (India time). Work out dates lik
 
 How to work:
 - Use the tools to read or change data. Never invent data that a tool did not return.
+- Use as few tool calls as possible. Never call the same tool twice with the same arguments. For skill questions call getMyProfile once and searchJobs once, then answer.
 - If you need an id you do not know, call a read tool first to find it.
 - If the request is unclear, ask one short question instead of guessing.
 - If a tool returns an error, explain it in simple words and suggest what the user can do.

@@ -9,7 +9,7 @@ import { buildSystemPrompt } from "./systemPrompt";
 import type { AgentResult, AgentStep } from "./types";
 
 /** Stops the agent from looping forever and using up your Gemini quota. */
-const MAX_ROUNDS = 10;
+const MAX_ROUNDS = 6;
 
 async function generateContentWithRetry<T>(generate: () => Promise<T>): Promise<T> {
   for (let retry = 0; ; retry++) {
@@ -27,8 +27,8 @@ async function generateContentWithRetry<T>(generate: () => Promise<T>): Promise<
         status === 429 ||
         (typeof message === "string" &&
           (message.includes("UNAVAILABLE") || message.includes("RESOURCE_EXHAUSTED")));
-      if (!retryable || retry >= 3) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 2 ** (retry + 1) * 1000));
+      if (!retryable || retry >= 2) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 2 ** retry * 1000));
     }
   }
 }
@@ -51,6 +51,7 @@ export async function runAgent(messages: ChatMessage[]): Promise<AgentResult> {
   }));
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
+    const geminiStartedAt = performance.now();
     const response = await generateContentWithRetry(() =>
       ai.models.generateContent({
         model: GEMINI_MODEL,
@@ -61,6 +62,9 @@ export async function runAgent(messages: ChatMessage[]): Promise<AgentResult> {
           temperature: 0.2,
         },
       })
+    );
+    console.log(
+      `[CareerMatch] round ${round + 1} Gemini call: ${Math.round(performance.now() - geminiStartedAt)}ms`
     );
 
     const calls = response.functionCalls ?? [];
@@ -76,7 +80,11 @@ export async function runAgent(messages: ChatMessage[]): Promise<AgentResult> {
 
     const responseParts: Part[] = [];
     for (const call of calls) {
+      const toolStartedAt = performance.now();
       const step = await runTool(call.name ?? "", call.args ?? {});
+      console.log(
+        `[CareerMatch] round ${round + 1} tool ${call.name ?? ""}: ${Math.round(performance.now() - toolStartedAt)}ms`
+      );
       steps.push(step);
       responseParts.push({
         functionResponse: {

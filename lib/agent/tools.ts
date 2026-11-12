@@ -55,7 +55,7 @@ const searchJobs = defineTool({
       .min(1)
       .optional()
       .describe("Case-insensitive text to match in the job title or company"),
-    limit: z.number().int().min(1).max(20).default(10).describe("Maximum jobs to return (1-20)"),
+    limit: z.number().int().min(1).max(8).default(8).describe("Maximum jobs to return (1-8)"),
   }),
   run: async ({ city, keyword, limit }) => {
     const profile = await getCurrentProfile();
@@ -80,21 +80,23 @@ const searchJobs = defineTool({
           job.title.toLowerCase().includes(normalizedKeyword) ||
           job.company.toLowerCase().includes(normalizedKeyword)
       )
-      .map((job) => ({
-        id: job.id,
-        title: job.title,
-        company: job.company,
-        city: job.city,
-        work_mode: job.work_mode,
-        job_type: job.job_type,
-        min_cgpa: job.min_cgpa,
-        salary_lpa_min: job.salary_lpa_min,
-        salary_lpa_max: job.salary_lpa_max,
-        apply_by: job.apply_by,
-        ...scoreJobMatch(job.required_skills, job.nice_to_have, profile.skills),
-      }))
+      .map((job) => {
+        const { match_score, missing_skills } = scoreJobMatch(
+          job.required_skills,
+          job.nice_to_have,
+          profile.skills
+        );
+        return {
+          id: job.id,
+          title: job.title,
+          company: job.company,
+          city: job.city,
+          match_score,
+          missing_skills,
+        };
+      })
       .sort((a, b) => b.match_score - a.match_score)
-      .slice(0, limit);
+      .slice(0, Math.min(limit, 8));
 
     return { count: jobs.length, jobs };
   },
