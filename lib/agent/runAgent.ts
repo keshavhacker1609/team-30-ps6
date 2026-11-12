@@ -9,7 +9,29 @@ import { buildSystemPrompt } from "./systemPrompt";
 import type { AgentResult, AgentStep } from "./types";
 
 /** Stops the agent from looping forever and using up your Gemini quota. */
-const MAX_ROUNDS = 5;
+const MAX_ROUNDS = 10;
+
+async function generateContentWithRetry<T>(generate: () => Promise<T>): Promise<T> {
+  for (let retry = 0; ; retry++) {
+    try {
+      return await generate();
+    } catch (error) {
+      const details =
+        typeof error === "object" && error !== null
+          ? (error as { status?: unknown; message?: unknown })
+          : undefined;
+      const status = details?.status;
+      const message = error instanceof Error ? error.message : details?.message;
+      const retryable =
+        status === 503 ||
+        status === 429 ||
+        (typeof message === "string" &&
+          (message.includes("UNAVAILABLE") || message.includes("RESOURCE_EXHAUSTED")));
+      if (!retryable || retry >= 3) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 2 ** (retry + 1) * 1000));
+    }
+  }
+}
 
 /**
  * THE AGENT LOOP
@@ -29,15 +51,17 @@ export async function runAgent(messages: ChatMessage[]): Promise<AgentResult> {
   }));
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents,
-      config: {
-        systemInstruction: buildSystemPrompt(),
-        tools: [{ functionDeclarations }],
-        temperature: 0.2,
-      },
-    });
+    const response = await generateContentWithRetry(() =>
+      ai.models.generateContent({
+        model: GEMINI_MODEL,
+        contents,
+        config: {
+          systemInstruction: buildSystemPrompt(),
+          tools: [{ functionDeclarations }],
+          temperature: 0.2,
+        },
+      })
+    );
 
     const calls = response.functionCalls ?? [];
 
