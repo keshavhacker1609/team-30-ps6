@@ -1,83 +1,132 @@
 import "server-only";
 import { z } from "zod";
-import { defineTool, type AgentTool } from "./defineTool";
+import { CURRENT_USER_ID } from "../currentUser";
+import { todayInIndia } from "../dates";
+import { scoreJobMatch } from "../jobMatch";
 import { getSupabase } from "../supabase";
-import { isoDate } from "../schemas";
+import { defineTool, type AgentTool } from "./defineTool";
 
-/*
- * EXAMPLE TOOLS for the starter "tasks" table (seed/00_starter_example.sql).
- * They show the pattern: 1 read tool + 2 write tools.
- *
- * YOUR JOB: replace these with tools for your problem statement.
- * Tips:
- *  - Write the description as "Use this when ..." so Gemini knows WHEN to call it.
- *  - Describe every field, including its format (for example YYYY-MM-DD).
- *  - Return small, clean objects. Gemini reads what you return.
- *  - Throw an Error with a clear message when something is wrong. The agent will explain it.
- */
+function getJoinedJobDetails(value: unknown) {
+  const job = Array.isArray(value) ? value[0] : value;
+  if (
+    typeof job === "object" &&
+    job !== null &&
+    "id" in job &&
+    typeof job.id === "number" &&
+    "title" in job &&
+    typeof job.title === "string" &&
+    "company" in job &&
+    typeof job.company === "string" &&
+    "city" in job &&
+    typeof job.city === "string"
+  ) {
+    return { id: job.id, title: job.title, company: job.company, city: job.city };
+  }
+}
 
-const listTasks = defineTool({
-  name: "listTasks",
+async function getCurrentProfile() {
+  const { data, error } = await getSupabase()
+    .from("profiles")
+    .select("id, name, degree, branch, grad_year, cgpa, preferred_cities, skills, interests")
+    .eq("id", CURRENT_USER_ID)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error(`No profile found for ${CURRENT_USER_ID}`);
+  return data;
+}
+
+const getMyProfile = defineTool({
+  name: "getMyProfile",
   description:
-    "Use this when the user wants to see their tasks. Can filter by status. Returns at most 20 tasks, newest first.",
+    "Use this when the user asks about their profile, skills, branch, CGPA, or preferred cities.",
+  schema: z.object({}),
+  run: async () => ({ profile: await getCurrentProfile() }),
+});
+
+const searchJobs = defineTool({
+  name: "searchJobs",
+  description:
+    "Use this when the user wants to find eligible jobs. Optionally filter by city or a keyword in the job title or company.",
   schema: z.object({
-    status: z
-      .enum(["open", "done", "all"])
+    city: z.string().trim().min(1).optional().describe("Exact job city to filter by"),
+    keyword: z
+      .string()
+      .trim()
+      .min(1)
       .optional()
-      .describe("Which tasks to return. Default is all."),
+      .describe("Case-insensitive text to match in the job title or company"),
+    limit: z.number().int().min(1).max(20).default(10).describe("Maximum jobs to return (1-20)"),
   }),
-  run: async ({ status }) => {
+  run: async ({ city, keyword, limit }) => {
+    const profile = await getCurrentProfile();
     let query = getSupabase()
-      .from("tasks")
-      .select("id, title, due_date, status")
-      .order("created_at", { ascending: false })
-      .limit(20);
-    if (status && status !== "all") query = query.eq("status", status);
+      .from("jobs")
+      .select(
+        "id, title, company, city, work_mode, job_type, min_cgpa, eligible_branches, required_skills, nice_to_have, salary_lpa_min, salary_lpa_max, apply_by"
+      )
+      .lte("min_cgpa", profile.cgpa)
+      .contains("eligible_branches", [profile.branch])
+      .gte("apply_by", todayInIndia());
+    if (city) query = query.eq("city", city);
+
     const { data, error } = await query;
     if (error) throw new Error(error.message);
-    return { count: data.length, tasks: data };
+
+    const normalizedKeyword = keyword?.toLowerCase();
+    const jobs = data
+      .filter(
+        (job) =>
+          !normalizedKeyword ||
+          job.title.toLowerCase().includes(normalizedKeyword) ||
+          job.company.toLowerCase().includes(normalizedKeyword)
+      )
+      .map((job) => ({
+        id: job.id,
+        title: job.title,
+        company: job.company,
+        city: job.city,
+        work_mode: job.work_mode,
+        job_type: job.job_type,
+        min_cgpa: job.min_cgpa,
+        salary_lpa_min: job.salary_lpa_min,
+        salary_lpa_max: job.salary_lpa_max,
+        apply_by: job.apply_by,
+        ...scoreJobMatch(job.required_skills, job.nice_to_have, profile.skills),
+      }))
+      .sort((a, b) => b.match_score - a.match_score)
+      .slice(0, limit);
+
+    return { count: jobs.length, jobs };
   },
 });
 
-const createTask = defineTool({
-  name: "createTask",
-  description: "Use this when the user asks to add, create or remember a new task.",
-  writes: true,
-  schema: z.object({
-    title: z.string().trim().min(1).max(200).describe("Short title of the task"),
-    due_date: isoDate.optional().describe("Due date in YYYY-MM-DD format, if the user gave one"),
-  }),
-  run: async ({ title, due_date }) => {
+const getMyShortlist = defineTool({
+  name: "getMyShortlist",
+  description: "Use this when the user asks to see jobs they have shortlisted.",
+  schema: z.object({}),
+  run: async () => {
     const { data, error } = await getSupabase()
-      .from("tasks")
-      .insert({ title, due_date: due_date ?? null })
-      .select("id, title, due_date, status")
-      .single();
+      .from("shortlists")
+      .select("job_id, match_score, created_at, jobs(id, title, company, city)")
+      .eq("profile_id", CURRENT_USER_ID)
+      .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
-    return { created: data };
+
+    return {
+      shortlists: data.map((item) => {
+        const job = getJoinedJobDetails(item.jobs);
+        if (!job) throw new Error(`No job found with id ${item.job_id}`);
+        return {
+          job_id: item.job_id,
+          title: job.title,
+          company: job.company,
+          city: job.city,
+          score: item.match_score,
+          saved_date: item.created_at,
+        };
+      }),
+    };
   },
 });
 
-const completeTask = defineTool({
-  name: "completeTask",
-  description:
-    "Use this when the user says a task is finished. Needs the task id, so call listTasks first if you do not know it.",
-  writes: true,
-  schema: z.object({
-    id: z.number().int().positive().describe("The id of the task"),
-  }),
-  run: async ({ id }) => {
-    const { data, error } = await getSupabase()
-      .from("tasks")
-      .update({ status: "done" })
-      .eq("id", id)
-      .select("id, title, status")
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!data) throw new Error(`No task found with id ${id}`);
-    return { updated: data };
-  },
-});
-
-/** Every tool in this list is given to Gemini. Add your own tools here. */
-export const tools: AgentTool[] = [listTasks, createTask, completeTask];
+export const tools: AgentTool[] = [getMyProfile, searchJobs, getMyShortlist];
