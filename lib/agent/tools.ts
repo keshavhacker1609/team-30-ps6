@@ -107,7 +107,7 @@ const getMyShortlist = defineTool({
   run: async () => {
     const { data, error } = await getSupabase()
       .from("shortlists")
-      .select("job_id, match_score, created_at, jobs(id, title, company, city)")
+      .select("job_id, match_score, reason, created_at, jobs(id, title, company, city)")
       .eq("profile_id", CURRENT_USER_ID)
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
@@ -121,7 +121,8 @@ const getMyShortlist = defineTool({
           title: job.title,
           company: job.company,
           city: job.city,
-          score: item.match_score,
+          match_score: item.match_score,
+          reason: item.reason,
           saved_date: item.created_at,
         };
       }),
@@ -176,11 +177,13 @@ const saveToShortlist = defineTool({
       if (shortlistError) throw new Error(shortlistError.message);
       if (existing) throw new Error(`${job.title} is already in your shortlist`);
 
+      const match = scoreJobMatch(job.required_skills, job.nice_to_have, profile.skills);
       savedJobs.push({
         job_id: job.id,
         title: job.title,
         company: job.company,
-        score: scoreJobMatch(job.required_skills, job.nice_to_have, profile.skills).match_score,
+        match_score: match.match_score,
+        reason: `Matched: ${match.matched_skills.join(", ") || "none"}. Missing: ${match.missing_skills.join(", ") || "none"}`,
       });
     }
 
@@ -190,12 +193,20 @@ const saveToShortlist = defineTool({
         savedJobs.map((job) => ({
           profile_id: CURRENT_USER_ID,
           job_id: job.job_id,
-          match_score: job.score,
+          match_score: job.match_score,
+          reason: job.reason,
         }))
       );
     if (error) throw new Error(error.message);
 
-    return { saved: savedJobs.map(({ title, company, score }) => ({ title, company, score })) };
+    return {
+      saved: savedJobs.map(({ title, company, match_score, reason }) => ({
+        title,
+        company,
+        match_score,
+        reason,
+      })),
+    };
   },
 });
 

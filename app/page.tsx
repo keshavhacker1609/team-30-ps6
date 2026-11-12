@@ -2,16 +2,10 @@
 
 import { useState } from "react";
 import AgentChat from "@/components/AgentChat";
-import TaskList from "@/components/TaskList";
+import ProfileCard from "@/components/ProfileCard";
+import ShortlistPanel from "@/components/ShortlistPanel";
 
-/*
- * HOME PAGE
- * Left: the agent chat. Right: the data the agent works on (here: tasks).
- * YOUR JOB: replace TaskList with your own data view (orders, tickets, claims, ...)
- * and add more pages under app/ (for example app/orders/page.tsx).
- */
 export default function HomePage() {
-  // Changes every time the agent writes data, so the list on the right reloads.
   const [refreshKey, setRefreshKey] = useState(0);
 
   async function logout() {
@@ -21,12 +15,17 @@ export default function HomePage() {
 
   return (
     <main className="mx-auto max-w-6xl p-4 md:p-6">
-      <header className="mb-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold">Hackathon Starter</h1>
-          <p className="text-sm text-slate-500">Replace this with your app name and problem statement.</p>
+      <header className="mb-4 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="break-words text-xl font-semibold">CareerMatch · AI job match agent</h1>
+          <p className="text-sm text-slate-500">
+            Find eligible jobs, see missing skills, build your shortlist.
+          </p>
         </div>
-        <button onClick={logout} className="text-sm text-slate-500 hover:text-slate-900">
+        <button
+          onClick={logout}
+          className="shrink-0 whitespace-nowrap text-sm text-slate-500 hover:text-slate-900"
+        >
           Log out
         </button>
       </header>
@@ -34,8 +33,9 @@ export default function HomePage() {
         <section className="md:col-span-3">
           <AgentChat onDataChanged={() => setRefreshKey((k) => k + 1)} />
         </section>
-        <section className="md:col-span-2">
-          <TaskList refreshKey={refreshKey} />
+        <section className="min-w-0 space-y-4 md:col-span-2">
+          <ProfileCard refreshKey={refreshKey} />
+          <ShortlistPanel refreshKey={refreshKey} />
         </section>
       </div>
     </main>

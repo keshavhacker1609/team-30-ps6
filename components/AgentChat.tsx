@@ -5,11 +5,10 @@ import type { AgentResult, AgentStep } from "@/lib/agent/types";
 
 type Message = { role: "user" | "model"; text: string; steps?: AgentStep[] };
 
-// YOUR JOB: change these sample prompts to match your problem statement.
 const SAMPLE_PROMPTS = [
-  "Add a task to call the vendor tomorrow, then show all my tasks.",
-  "Which tasks are still open?",
-  "Mark the vendor call task as done.",
+  "Find jobs in Chennai that match my skills and save the top 3.",
+  "Which skills am I missing for data analyst roles?",
+  "I just learned Docker, add it to my profile and search again.",
 ];
 
 export default function AgentChat({ onDataChanged }: { onDataChanged?: () => void }) {
